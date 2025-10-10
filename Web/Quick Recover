@@ -1,0 +1,226 @@
+# Quick Recover — CTF write‑up 
+
+## Summary / final flag
+
+I found the flag at:
+
+`http://54.72.82.22:8948/IKnewYouWouldFindThis/flag.txt`
+
+Flag contents (exact):
+
+`saftcf{d37d9350-9603-453b-800c-2de5f123b1d6d37d9350-9603-453b-800c-2de5f123b1d7}`
+
+---
+
+## 1) Recon — fetch the landing page
+
+Start by pulling the main page and reading the HTML. The page had hints: “Find flag.txt”, “Inspect the DOM or the network”, and a hidden `<img src="quick_recovery.jpg" style="display:none" />`.
+
+Commands:
+
+`curl -s http://54.72.82.22:8948 -o index.html curl -s -i http://54.72.82.22:8948/index.html`
+
+Why: Always check the HTML. CTF authors often put pointers in comments, hidden image tags, or obfuscated text.
+
+---
+
+## 2) Grab referenced assets (JS / CSS / hidden image)
+
+We fetched the linked JS/CSS and the hidden image referenced by the HTML.
+
+Commands used:
+
+`curl -s -i http://54.72.82.22:8948/js/ui.js curl -s -i http://54.72.82.22:8948/css/styles.css curl -s -O http://54.72.82.22:8948/quick_recovery.jpg   # initial attempt (root)`
+
+Findings:
+
+- `ui.js` existed and was tiny — it only randomized latency text (red herring).
+    
+- The `quick_recovery.jpg` at the root was a tiny 404 HTML disguised as a jpg (red herring).
+    
+
+Lesson: follow assets listed in the HTML carefully — they can be root-relative or in subfolders (assets/).
+
+---
+
+## 3) Enumerate common paths and directories
+
+We probed lots of common filenames and directories to find anything present and useful.
+
+Representative commands:
+
+`# quick manual probes 
+curl -s -i http://54.72.82.22:8948/flag.txt 
+curl -s -i http://54.72.82.22:8948/login.html
+curl -s -i http://54.72.82.22:8948/about
+`# batch probing example 
+for p in index.html about login.html js css assets quick_recovery.jpg; do   curl -s -o /dev/null -w "%{http_code} %{url_effective}\n" http://54.72.82.22:8948/$p done`
+
+Key discovery:
+
+`200 http://54.72.82.22:8948/assets/quick_recovery.jpg`
+
+(There was a real image under `/assets/quick_recovery.jpg` — the root one was a fake 404.)
+
+Lesson: always try both the literal filename and likely directories (assets/, img/, images/).
+
+---
+
+## 4) Download & inspect the real image
+
+Download the real asset and check file header, strings, and metadata.
+
+Commands:
+
+`curl -s -O http://54.72.82.22:8948/assets/quick_recovery.jpg hexdump -C quick_recovery.jpg | sed -n '1,160p' file quick_recovery.jpg strings quick_recovery.jpg | less exiftool quick_recovery.jpg`
+
+Findings:
+
+- `file`/`hexdump` showed a valid JPEG (JFIF header). The image size was 3000×3000.
+    
+- `strings` produced lots of gibberish tokens (typical of compressed image data, but sometimes contains readable strings, too).
+    
+- `exiftool` showed standard EXIF/JFIF data (no obvious comment flag in EXIF).
+    
+
+---
+
+## 5) Test common stego tools
+
+Because many CTFs hide content inside images, we tried stego tools.
+
+Commands tried:
+
+`binwalk -e quick_recovery.jpg 
+`steghide info quick_recovery.jpg 
+`steghide extract -sf quick_recovery.jpg -xf secret.txt   # try with empty password`
+
+Findings:
+
+- `steghide info` reported a capacity (~67.8 KB) and asked if we wanted info about embedded data (so steghide detected embedded payload; a passphrase was required).
+    
+- `steghide extract` without a correct passphrase failed.
+    
+
+Important: The presence of `steghide` metadata strongly suggested the flag (or a pointer) was embedded and passphrase protected.
+
+---
+
+## 6) Don’t tunnel on one tool — look at the image visually
+
+While running stego checks, you should also view the image — sometimes it’s visually a QR code, barcode, or contains visible text that scanners recognize. This is where the breakthrough was made.
+
+Action that gave the answer:
+
+- Open the `quick_recovery.jpg` (or scan it with your phone / Google Lens). The image was a **QR code**.
+    
+
+I scanned it and got this text:
+
+`Hey Jerry, I couldnt let the people know our secret if I was compromised. This path should lead you to the right way, Remember, from the root. Stay Cyber Aware and piece everything together.  /VXarjLbhJbhyqSvaqGuvf`
+
+---
+
+## 7) Recognize and decode the hint
+
+That trailing string `/VXarjLbhJbhyqSvaqGuvf` is ROT13-obfuscated. ROT13 decode gives:
+
+`/IKnewYouWouldFindThis`
+
+Command to decode ROT13 (example):
+
+`echo '/VXarjLbhJbhyqSvaqGuvf' | tr 'A-Za-z' 'N-ZA-Mn-za-m' # → /IKnewYouWouldFindThis`
+
+---
+
+## 8) Follow the decoded path
+
+The decoded path hinted at a directory. We probed that path on the same port (8948).
+
+Commands:
+
+`curl -iL http://54.72.82.22:8948/IKnewYouWouldFindThis/ # probe inside dir 
+`for p in index.html flag.txt README.txt quick_recovery.jpg; do   curl -s -o /dev/null -w "%{http_code} %{url_effective}\n" "http://54.72.82.22:8948/IKnewYouWouldFindThis/$p" done`
+
+Key result:
+
+`200 http://54.72.82.22:8948/IKnewYouWouldFindThis/flag.txt`
+
+Fetch the flag:
+
+`curl -sS http://54.72.82.22:8948/IKnewYouWouldFindThis/flag.txt`
+
+Which printed:
+
+`saftcf{d37d9350-9603-453b-800c-2de5f123b1d6d37d9350-9603-453b-800c-2de5f123b1d7}`
+
+---
+
+## Full list of useful commands (replayable)
+
+`# initial page 
+curl -s -i http://54.72.82.22:8948  
+`# get assets 
+curl -s -i http://54.72.82.22:8948/js/ui.js 
+curl -s -i http://54.72.82.22:8948/css/styles.css  
+`# probe quick hits 
+curl -s -i http://54.72.82.22:8948/flag.txt  
+`# enumerate (small) 
+for p in index.html login.html js css assets quick_recovery.jpg; do   curl -s -o /dev/null -w "%{http_code} %{url_effective}\n" http://54.72.82.22:8948/$p done  
+`# followup: real asset path (found) 
+curl -s -O http://54.72.82.22:8948/assets/quick_recovery.jpg  
+`# inspect image file 
+quick_recovery.jpg hexdump -C quick_recovery.jpg | sed -n '1,60p' strings quick_recovery.jpg | less exiftool quick_recovery.jpg  
+`# stego checks 
+binwalk -e quick_recovery.jpg steghide info quick_recovery.jpg steghide extract -sf quick_recovery.jpg -xf secret.txt   
+`# try passphrases if needed  
+`# ROT13 decode 
+echo '/VXarjLbhJbhyqSvaqGuvf' | tr 'A-Za-z' 'N-ZA-Mn-za-m'  # follow the decoded path (use trailing slash) curl -iL http://54.72.82.22:8948/IKnewYouWouldFindThis/ for p in flag.txt index.html; do   curl -s -o /dev/null -w "%{http_code} %{url_effective}\n" http://54.72.82.22:8948/IKnewYouWouldFindThis/$p done curl -sS http://54.72.82.22:8948/IKnewYouWouldFindThis/flag.txt`
+
+---
+
+## What were red herrings / wasted effort
+
+- Root `quick_recovery.jpg` was a fake 404 HTML file (not the real asset). This distracted us briefly.
+    
+- `ui.js` was just a noisy widget script that randomized latency text — useful to confirm the page but not the flag.
+    
+- Running `steghide` and brute-forcing passphrases was a valid approach but turned out unnecessary once the QR code was read. Still, checking it was the right move because `steghide info` did report embedded capacity — authors sometimes hide payloads that require a passphrase.
+    
+- `strings` on the image produced lots of garbage; that’s normal for compressed images. Those strings are sometimes the passphrase, but here the passphrase approach failed.
+    
+
+Lesson: always visually inspect the image (phone scanner / Google Lens). If it’s a QR, that’s the fastest path.
+
+---
+
+## Learning points & tips for next CTFs
+
+1. **Read the HTML first.** It often contains direction hints or links to assets.
+    
+2. **Follow asset paths exactly.** Root-relative vs. subfolder paths matter (`/assets/` vs `/quick_recovery.jpg`).
+    
+3. **Open images visually.** Many image challenges are QR codes or contain visible clues.
+    
+4. **Use `steghide info` / `binwalk` / `exiftool`** when you suspect hidden payloads — but don’t lock into one strategy. Rotate approaches.
+    
+5. **ROT13 is common in challenges.** If a weird alpha string appears, try simple ciphers before brute force.
+    
+6. **Automate simple enumeration** (small scripts or dir wordlists), but avoid huge blind brute force — pivot based on hints.
+    
+7. **Check redirects carefully.** The server tried redirecting to port 80; follow the path on the same port if port 80 is closed.
+    
+
+---
+
+## Short checklist for replaying this challenge quickly
+
+1. `curl index.html` → find `<img src="quick_recovery.jpg">`.
+    
+2. `curl` both root and `/assets/quick_recovery.jpg` → download the real one.
+    
+3. Open the image (scanner/Google Lens) → scan QR code.
+    
+4. ROT13 the returned path → get `/IKnewYouWouldFindThis`.
+    
+5. `curl` that directory path and `flag.txt` → read flag.
