@@ -10,7 +10,7 @@
 
 The app issues an `auth` cookie containing a JWT. The server accepted a token with header `{"alg":"none","typ":"JWT"}` and did not require/validate a signature. By replacing the token payload to set `"role":"admin"` (and leaving the header as `alg: none`) the `/admin` endpoint accepted the cookie and returned the admin-only flag.
 
-## Steps & commands (what I ran)
+## Steps & commands
 
 1. **Check root endpoint — see cookie and response**
 		`curl -s -i http://54.72.82.22:8805/ | sed -n '1,240p'
