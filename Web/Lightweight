@@ -12,7 +12,7 @@ The login endpoint `/connect` is vulnerable to injection in the credentials fiel
 
 ---
 
-## What I did (commands I ran)
+## What I did 
 
 1. **Initial POST attempt with a long payload (failed/no timing):**
     
