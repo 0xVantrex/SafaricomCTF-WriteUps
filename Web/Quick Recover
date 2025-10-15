@@ -1,7 +1,5 @@
 # Quick Recover — CTF write‑up 
 
-## Summary / final flag
-
 I found the flag at:
 
 `http://54.72.82.22:8948/IKnewYouWouldFindThis/flag.txt`
