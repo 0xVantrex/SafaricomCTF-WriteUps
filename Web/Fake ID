@@ -5,7 +5,6 @@
 **Impact:** Local user can forge a token with `role: "admin"` and access `/admin` to retrieve the flag.
 
 ---
-
 ## Summary
 
 The app issues an `auth` cookie containing a JWT. The server accepted a token with header `{"alg":"none","typ":"JWT"}` and did not require/validate a signature. By replacing the token payload to set `"role":"admin"` (and leaving the header as `alg: none`) the `/admin` endpoint accepted the cookie and returned the admin-only flag.
