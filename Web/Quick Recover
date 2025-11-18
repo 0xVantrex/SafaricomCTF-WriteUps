@@ -12,6 +12,7 @@ Flag contents (exact):
 
 ## 1) Recon — fetch the landing page
 
+
 Start by pulling the main page and reading the HTML. The page had hints: “Find flag.txt”, “Inspect the DOM or the network”, and a hidden `<img src="quick_recovery.jpg" style="display:none" />`.
 
 Commands:
