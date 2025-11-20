@@ -1,5 +1,6 @@
 ### Quick concise write-up of exactly what I did .
 
+
 1. Visited the proxy landing page (POST form at `http://54.72.82.22:8804/`). Confirmed it fetches remote URLs.  
     Command used:  
     `curl -i -X POST "http://54.72.82.22:8804/" -H "Content-Type: application/x-www-form-urlencoded" --data-urlencode "url=http://example.com"`
